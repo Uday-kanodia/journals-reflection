@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Helper Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isVaultMember(vaultId) {
+      let vault = get(/databases/$(database)/documents/vaults/$(vaultId)).data;
+      return isSignedIn() && (
+        vault.ownerId == request.auth.uid ||
+        (vault.members != null && vault.members[request.auth.uid] != null) ||
+        (vault.memberEmails != null && request.auth.token.email != null && 
+         (request.auth.token.email in vault.memberEmails || vault.memberEmails.hasAny([request.auth.token.email])))
+      );
+    }
+
+    function canWriteInVault(vaultId) {
+      let vault = get(/databases/$(database)/documents/vaults/$(vaultId)).data;
+      return isSignedIn() && (
+        vault.ownerId == request.auth.uid ||
+        (vault.members != null && vault.members[request.auth.uid] != null && 
+         (vault.members[request.auth.uid].role == 'owner' || vault.members[request.auth.uid].role == 'editor'))
+      );
+    }
+
+    // 1. User profile document isolated to authenticated owner
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      
+      // Multi-turn interactions / journal entries isolated to the authenticated owner
+      match /interactions/{interactionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Weekly digests isolated to the authenticated owner
+      match /weekly_digests/{digestId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // 2. Collaborative Reflection Vaults
+    match /vaults/{vaultId} {
+      allow read: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (resource.data.members != null && resource.data.members[request.auth.uid] != null) ||
+        (resource.data.memberEmails != null && request.auth.token.email != null && 
+         (request.auth.token.email in resource.data.memberEmails || resource.data.memberEmails.hasAny([request.auth.token.email])))
+      );
+
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid ||
+        (resource.data.members != null && resource.data.members[request.auth.uid] != null &&
+         (resource.data.members[request.auth.uid].role == 'owner' || resource.data.members[request.auth.uid].role == 'editor'))
+      );
+
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      // Collaborative interactions / retrospectives inside a vault
+      match /interactions/{interactionId} {
+        allow read: if isVaultMember(vaultId);
+        allow create, update: if canWriteInVault(vaultId);
+        allow delete: if isSignedIn() && (
+          resource.data.userId == request.auth.uid || 
+          get(/databases/$(database)/documents/vaults/$(vaultId)).data.ownerId == request.auth.uid
+        );
+      }
+    }
+  }
+}

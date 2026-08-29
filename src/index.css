@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #f5f5f0;
+    color: #4a4a40;
+  }
+}
+
+.font-serif {
+  font-family: 'Libre Baskerville', 'Georgia', serif;
+}
+
+.serif-text {
+  font-family: 'Libre Baskerville', 'Georgia', serif;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+}
+
+.sidebar-item-active {
+  background: #5A5A40;
+  color: #ffffff;
+}
+
+/* Custom subtle scrollbar in natural earth tones */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #ebebe5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c8c8bd;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8a8a7a;
+}

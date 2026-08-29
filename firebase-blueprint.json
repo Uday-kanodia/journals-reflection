@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with display information and timestamps",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "displayName": { "type": "string", "maxLength": 200 },
+        "email": { "type": "string", "maxLength": 320 },
+        "photoURL": { "type": "string", "maxLength": 2048 },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "JournalInteraction": {
+      "title": "JournalInteraction",
+      "description": "Reflective journaling entry with multi-turn conversation messages and metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "vaultId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "messages": { "type": "array" },
+        "tags": { "type": "array" },
+        "energyScore": { "type": "number" },
+        "sentimentScore": { "type": "number" },
+        "emotionalThemes": { "type": "array" },
+        "isFavorite": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "createdAt", "updatedAt"]
+    },
+    "CollaborativeVault": {
+      "title": "CollaborativeVault",
+      "description": "Shared retrospective vault for mentorship pairs and team retrospectives",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "ownerEmail": { "type": "string", "maxLength": 320 },
+        "members": { "type": "object" },
+        "memberEmails": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "title", "ownerId", "createdAt", "updatedAt"]
+    },
+    "WeeklyDigest": {
+      "title": "WeeklyDigest",
+      "description": "Weekly synthesis digest distilling core takeaways, growth metrics, and recurring themes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "weekStartDate": { "type": "string" },
+        "weekEndDate": { "type": "string" },
+        "title": { "type": "string", "maxLength": 300 },
+        "synthesis": { "type": "string", "maxLength": 10000 },
+        "coreThemes": { "type": "array" },
+        "keyTakeaways": { "type": "array" },
+        "growthActions": { "type": "array" },
+        "emotionalOverview": { "type": "string", "maxLength": 2000 },
+        "entryCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "weekStartDate", "weekEndDate", "synthesis", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile state"
+    },
+    "/users/{userId}/interactions/{interactionId}": {
+      "schema": "JournalInteraction",
+      "description": "User private multi-turn journal reflections and conversations"
+    },
+    "/users/{userId}/weekly_digests/{digestId}": {
+      "schema": "WeeklyDigest",
+      "description": "Automated weekly synthesis digests"
+    },
+    "/vaults/{vaultId}": {
+      "schema": "CollaborativeVault",
+      "description": "Shared collaborative retrospective vaults"
+    },
+    "/vaults/{vaultId}/interactions/{interactionId}": {
+      "schema": "JournalInteraction",
+      "description": "Shared retrospective entries within collaborative vault"
+    }
+  }
+}

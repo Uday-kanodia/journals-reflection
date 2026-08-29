@@ -21,6 +21,15 @@ export interface EmotionalMetrics {
   primaryMood: string;
 }
 
+export interface JournalLocation {
+  placeName: string;
+  formattedAddress?: string;
+  lat: number;
+  lng: number;
+  placeId?: string;
+  notes?: string;
+}
+
 export interface JournalInteraction {
   id: string;
   userId: string;
@@ -31,6 +40,7 @@ export interface JournalInteraction {
   createdAt: string;
   updatedAt: string;
   messages: JournalMessage[];
+  location?: JournalLocation;
   tags?: string[];
   isFavorite?: boolean;
   energyScore?: number; // 1-10
@@ -136,3 +146,56 @@ export interface AnalyticsSummary {
   topKeywords: KeywordFrequency[];
   modeDistribution: { name: string; value: number }[];
 }
+
+// Admin & Role-Based Access Control
+export type SystemRole = 'admin' | 'member' | 'guest';
+
+export interface SystemUserRecord {
+  uid: string;
+  email: string;
+  displayName?: string;
+  photoURL?: string;
+  role: SystemRole;
+  createdAt: string;
+  lastLoginAt: string;
+  reflectionCount?: number;
+  isBanned?: boolean;
+}
+
+export interface SystemMetrics {
+  totalUsers: number;
+  totalReflections: number;
+  totalVaults: number;
+  totalDigests: number;
+  geminiSuccessRate: number;
+  avgResponseLatencyMs: number;
+  primaryModelActive: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  actorEmail: string;
+  actorUid: string;
+  action: string;
+  target?: string;
+  details: string;
+  severity: 'info' | 'warning' | 'security';
+}
+
+// External Notifications (Slack / Discord / Webhook)
+export type NotificationPlatform = 'slack' | 'discord' | 'webhook';
+export type NotificationTrigger = 'all' | 'high_energy' | 'high_clarity' | 'breakthrough' | 'weekly_digest';
+
+export interface NotificationConfig {
+  id: string;
+  userId: string;
+  platform: NotificationPlatform;
+  webhookUrl: string;
+  enabled: boolean;
+  triggers: NotificationTrigger[];
+  channelName?: string;
+  createdAt: string;
+  lastTriggeredAt?: string;
+}
+

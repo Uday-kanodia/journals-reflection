@@ -12,6 +12,8 @@ import {
   saveVaultInteraction,
   deleteVaultInteraction,
   subscribeToWeeklyDigests,
+  subscribeToNotificationConfigs,
+  updateJournalInteractionLocation,
 } from './firebase';
 import {
   JournalInteraction,
@@ -19,6 +21,8 @@ import {
   ReflectionMode,
   CollaborativeVault,
   WeeklyDigest,
+  JournalLocation,
+  NotificationConfig,
 } from './types';
 import { LandingView } from './components/LandingView';
 import { HistorySidebar } from './components/HistorySidebar';
@@ -27,6 +31,8 @@ import { AnalyticsView } from './components/AnalyticsView';
 import { WeeklyDigestView } from './components/WeeklyDigestView';
 import { CollaborativeVaultModal } from './components/CollaborativeVaultModal';
 import { SoundscapeDock } from './components/SoundscapeDock';
+import { AdminDashboardView } from './components/AdminDashboardView';
+import { NotificationSettingsModal } from './components/NotificationSettingsModal';
 import {
   BookHeart,
   LogOut,
@@ -38,6 +44,8 @@ import {
   TrendingUp,
   Users,
   Volume2,
+  Bell,
+  Settings,
 } from 'lucide-react';
 
 export default function App() {
@@ -45,8 +53,8 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Active Workspace View: 'journal' | 'analytics' | 'digests'
-  const [activeTab, setActiveTab] = useState<'journal' | 'analytics' | 'digests'>('journal');
+  // Active Workspace View: 'journal' | 'analytics' | 'digests' | 'admin'
+  const [activeTab, setActiveTab] = useState<'journal' | 'analytics' | 'digests' | 'admin'>('journal');
 
   // Firestore Interactions State (Personal or Vault)
   const [personalInteractions, setPersonalInteractions] = useState<JournalInteraction[]>([]);
@@ -61,6 +69,10 @@ export default function App() {
 
   // Weekly Digests State
   const [weeklyDigests, setWeeklyDigests] = useState<WeeklyDigest[]>([]);
+
+  // External Webhook Notifications State
+  const [notificationConfigs, setNotificationConfigs] = useState<NotificationConfig[]>([]);
+  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
 
   // Generation & Save Status
   const [isGenerating, setIsGenerating] = useState(false);
@@ -173,6 +185,26 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // 6. Real-Time External Notification Webhooks Subscription
+  useEffect(() => {
+    if (!currentUser) {
+      setNotificationConfigs([]);
+      return;
+    }
+
+    const unsubscribe = subscribeToNotificationConfigs(
+      currentUser.uid,
+      (data) => {
+        setNotificationConfigs(data);
+      },
+      (err) => {
+        console.error('[Notification Configs Subscription Error]:', err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
   // Derived current interactions list
   const currentInteractions = activeVaultId ? vaultInteractions : personalInteractions;
   const activeVault = vaults.find((v) => v.id === activeVaultId) || null;
@@ -246,7 +278,11 @@ export default function App() {
       : null);
 
   // Send Message & Converse with Gemini 3.6 Flash
-  const handleSendMessage = async (promptText: string, mode: ReflectionMode) => {
+  const handleSendMessage = async (
+    promptText: string,
+    mode: ReflectionMode,
+    location?: JournalLocation
+  ) => {
     if (!currentUser) return;
 
     let targetInteractionId = activeInteractionId;
@@ -263,10 +299,14 @@ export default function App() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         messages: [],
+        location: location || undefined,
       };
       setActiveInteractionId(targetInteractionId);
     } else {
-      currentSession = { ...activeInteraction };
+      currentSession = {
+        ...activeInteraction,
+        location: location !== undefined ? location : activeInteraction.location,
+      };
     }
 
     const userMsg: JournalMessage = {
@@ -358,12 +398,71 @@ export default function App() {
         await saveJournalInteraction(currentUser.uid, currentSession);
       }
       setSaveStatus('saved');
+
+      // Dispatch external notifications for matching active webhooks
+      const activeConfigs = notificationConfigs.filter((c) => c.enabled && c.webhookUrl);
+      if (activeConfigs.length > 0) {
+        for (const config of activeConfigs) {
+          let shouldTrigger = config.triggers.includes('all');
+          if (!shouldTrigger && config.triggers.includes('high_energy') && (currentSession.energyScore || 0) >= 8) {
+            shouldTrigger = true;
+          }
+          if (!shouldTrigger && config.triggers.includes('high_clarity') && (currentSession.emotionalDimensions?.clarity || 0) >= 75) {
+            shouldTrigger = true;
+          }
+          if (!shouldTrigger && config.triggers.includes('breakthrough') && mode === 'deepen') {
+            shouldTrigger = true;
+          }
+
+          if (shouldTrigger) {
+            fetch('/api/notifications/dispatch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                webhookUrl: config.webhookUrl,
+                platform: config.platform,
+                trigger: config.triggers[0] || 'all',
+                userEmail: currentUser.email || 'anonymous',
+                entry: {
+                  title: currentSession.title,
+                  summary: currentSession.summary || currentSession.messages[currentSession.messages.length - 1]?.content.slice(0, 300),
+                  category: currentSession.category || 'reflection',
+                  energyScore: currentSession.energyScore || 7,
+                  sentiment: currentSession.sentiment || 'balanced',
+                  location: currentSession.location,
+                },
+              }),
+            }).catch((err) => console.warn('[Notification Webhook Dispatch Warning]:', err));
+          }
+        }
+      }
     } catch (err: any) {
       console.error('[Gemini / Firestore Error]:', err);
       setSaveStatus('error');
       setSaveErrorMessage(err?.message || 'Failed to save or process reflection.');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // Update location for active interaction
+  const handleUpdateLocation = async (loc: JournalLocation | null) => {
+    if (!currentUser || !activeInteractionId || !activeInteraction) return;
+
+    const updatedSession: JournalInteraction = {
+      ...activeInteraction,
+      location: loc || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      if (activeVaultId) {
+        await saveVaultInteraction(activeVaultId, updatedSession);
+      } else {
+        await updateJournalInteractionLocation(currentUser.uid, activeInteractionId, loc);
+      }
+    } catch (err) {
+      console.error('[Update Location Error]:', err);
     }
   };
 
@@ -497,6 +596,11 @@ export default function App() {
               setActiveVaultId(null);
               setActiveInteractionId(null);
             }}
+            onOpenNotifications={() => setIsNotificationsModalOpen(true)}
+            onOpenAdmin={() => {
+              setActiveTab('admin');
+              setIsMobileSidebarOpen(false);
+            }}
           />
         </div>
 
@@ -518,6 +622,7 @@ export default function App() {
             saveErrorMessage={saveErrorMessage}
             isVaultContext={Boolean(activeVaultId)}
             vaultTitle={activeVault?.title}
+            onUpdateLocation={handleUpdateLocation}
             onRetrySave={() => {
               if (currentUser && activeInteraction) {
                 setSaveStatus('saving');
@@ -550,6 +655,13 @@ export default function App() {
             digests={weeklyDigests}
           />
         )}
+
+        {activeTab === 'admin' && (
+          <AdminDashboardView
+            currentUser={currentUser}
+            onClose={() => setActiveTab('journal')}
+          />
+        )}
       </div>
 
       {/* Collaborative Vaults Management Modal */}
@@ -563,6 +675,13 @@ export default function App() {
         }}
         isOpen={isVaultModalOpen}
         onClose={() => setIsVaultModalOpen(false)}
+      />
+
+      {/* External Notifications & Webhook Integration Modal */}
+      <NotificationSettingsModal
+        isOpen={isNotificationsModalOpen}
+        onClose={() => setIsNotificationsModalOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );

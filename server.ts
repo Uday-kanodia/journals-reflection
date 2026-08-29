@@ -298,6 +298,213 @@ async function startServer() {
     }
   });
 
+  // =========================================================================
+  // External Notifications Proxy (Slack, Discord, Custom Webhooks)
+  // =========================================================================
+  function validateWebhookUrl(rawUrl: string): boolean {
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+      const hostname = parsed.hostname.toLowerCase();
+      // Block SSRF to loopback, link-local metadata, or private IP spaces
+      if (
+        hostname === "localhost" ||
+        hostname === "127.0.0.1" ||
+        hostname === "0.0.0.0" ||
+        hostname === "169.254.169.254" ||
+        hostname.endsWith(".internal") ||
+        hostname.endsWith(".local") ||
+        hostname.startsWith("10.") ||
+        hostname.startsWith("192.168.")
+      ) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  app.post("/api/notifications/dispatch", async (req, res) => {
+    try {
+      const data = req.body && typeof req.body === "object" ? req.body : {};
+      const { webhookUrl, platform, trigger, entry, userEmail } = data;
+
+      if (!webhookUrl || typeof webhookUrl !== "string") {
+        return res.status(400).json({ error: "Missing or invalid webhookUrl" });
+      }
+
+      if (!validateWebhookUrl(webhookUrl)) {
+        return res.status(400).json({ error: "Invalid or restricted webhook URL target (SSRF prevention)." });
+      }
+
+      const safePlatform = platform === "discord" ? "discord" : platform === "slack" ? "slack" : "webhook";
+      const safeEntry = entry && typeof entry === "object" ? entry : {};
+      let payload: any = {};
+
+      if (safePlatform === "slack") {
+        payload = {
+          text: `✨ Reflection Log: ${safeEntry.title || "New Reflection"}`,
+          blocks: [
+            {
+              type: "header",
+              text: {
+                type: "plain_text",
+                text: `✨ ${safeEntry.title ? safeEntry.title.slice(0, 100) : "New Reflection"}`,
+              },
+            },
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*Category:* ${safeEntry.category || "reflection"} | *Mood/Sentiment:* ${safeEntry.sentiment || "balanced"} | *Energy:* ${safeEntry.energyScore || 7}/10\n${safeEntry.summary ? `> ${safeEntry.summary.slice(0, 500)}` : ""}`,
+              },
+            },
+            ...(safeEntry.location
+              ? [
+                  {
+                    type: "context",
+                    elements: [
+                      {
+                        type: "mrkdwn",
+                        text: `📍 *Location:* ${safeEntry.location.placeName || safeEntry.location.formattedAddress || "Pinned Geo Point"}`,
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ],
+        };
+      } else if (safePlatform === "discord") {
+        payload = {
+          content: "✨ **New Journal Reflection Logged**",
+          embeds: [
+            {
+              title: safeEntry.title || "New Reflection",
+              description: safeEntry.summary || "Reflection thoughts captured and synthesized.",
+              color: 5922368, // #5A5A40 olive tone
+              fields: [
+                { name: "Category", value: safeEntry.category || "reflection", inline: true },
+                { name: "Energy Level", value: `${safeEntry.energyScore || 7}/10`, inline: true },
+                ...(safeEntry.location
+                  ? [{ name: "📍 Location", value: safeEntry.location.placeName || "Pinned Location", inline: true }]
+                  : []),
+              ],
+              footer: { text: "Gemini Reflection Journal" },
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        };
+      } else {
+        // Generic Webhook
+        payload = {
+          event: "journal.reflection_parsed",
+          trigger: trigger || "entry_created",
+          timestamp: new Date().toISOString(),
+          userEmail: userEmail || "anonymous",
+          entry: {
+            title: safeEntry.title,
+            summary: safeEntry.summary,
+            category: safeEntry.category,
+            energyScore: safeEntry.energyScore,
+            sentiment: safeEntry.sentiment,
+            keywords: safeEntry.keywords,
+            location: safeEntry.location,
+          },
+        };
+      }
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      return res.json({
+        success: response.ok,
+        status: response.status,
+        platform: safePlatform,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      console.error("[Notification Dispatch Error]:", err);
+      return res.status(500).json({ error: err?.message || "Failed to dispatch notification webhook." });
+    }
+  });
+
+  app.post("/api/notifications/test", async (req, res) => {
+    try {
+      const data = req.body && typeof req.body === "object" ? req.body : {};
+      const { webhookUrl, platform } = data;
+
+      if (!webhookUrl || typeof webhookUrl !== "string" || !validateWebhookUrl(webhookUrl)) {
+        return res.status(400).json({ error: "Invalid webhook URL." });
+      }
+
+      const testEntry = {
+        title: "Test Reflection Signal",
+        summary: "This is an automated test signal from your Gemini Reflection Journal external notification system.",
+        category: "reflection",
+        sentiment: "positive",
+        energyScore: 9,
+        location: { placeName: "San Francisco, CA" },
+      };
+
+      // Reuse dispatch logic
+      const safePlatform = platform === "discord" ? "discord" : platform === "slack" ? "slack" : "webhook";
+      let payload: any;
+
+      if (safePlatform === "slack") {
+        payload = {
+          text: "🔔 Test Notification: Gemini Reflection Journal Webhook Connected!",
+          blocks: [
+            {
+              type: "header",
+              text: { type: "plain_text", text: "🔔 Webhook Test Successful" },
+            },
+            {
+              type: "section",
+              text: { type: "mrkdwn", text: "Your Slack webhook integration is active and verified for the Gemini Reflection Journal." },
+            },
+          ],
+        };
+      } else if (safePlatform === "discord") {
+        payload = {
+          content: "🔔 **Gemini Reflection Journal - Webhook Connected**",
+          embeds: [
+            {
+              title: "Webhook Test Successful",
+              description: "Your Discord channel is now connected to receive automated journal milestone alerts.",
+              color: 4549438,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        };
+      } else {
+        payload = {
+          event: "journal.test_ping",
+          status: "connected",
+          timestamp: new Date().toISOString(),
+          testEntry,
+        };
+      }
+
+      const response = await fetch(webhookUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      return res.json({
+        success: response.ok,
+        status: response.status,
+        message: response.ok ? "Test ping delivered successfully." : `Target server returned HTTP ${response.status}`,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err?.message || "Failed to deliver test notification." });
+    }
+  });
+
   // Vite Middleware Integration for Development & Static fallback for Production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

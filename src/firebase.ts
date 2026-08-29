@@ -14,6 +14,9 @@ import {
   getDoc,
   getDocs,
   deleteDoc,
+  updateDoc,
+  deleteField,
+  limit,
   query,
   where,
   orderBy,
@@ -22,10 +25,15 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import {
   JournalInteraction,
+  JournalLocation,
   UserProfile,
   CollaborativeVault,
   VaultMember,
   WeeklyDigest,
+  NotificationConfig,
+  AuditLogEntry,
+  SystemUserRecord,
+  SystemRole,
 } from './types';
 
 // Initialize Firebase SDK safely
@@ -172,6 +180,34 @@ export async function saveJournalInteraction(
     await setDoc(docRef, sanitized, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function updateJournalInteractionLocation(
+  userId: string,
+  interactionId: string,
+  location: JournalLocation | null
+): Promise<void> {
+  if (!userId || !interactionId) {
+    throw new Error('Missing userId or interactionId for updating location.');
+  }
+
+  const path = `users/${userId}/interactions/${interactionId}`;
+  const docRef = doc(db, 'users', userId, 'interactions', interactionId);
+  try {
+    if (location) {
+      await updateDoc(docRef, {
+        location: sanitizeForFirestore(location),
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      await updateDoc(docRef, {
+        location: deleteField(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
@@ -495,3 +531,188 @@ export async function saveWeeklyDigest(
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
+
+// ==========================================
+// 4. Notification Configurations CRUD
+// ==========================================
+
+export function subscribeToNotificationConfigs(
+  userId: string,
+  onUpdate: (configs: NotificationConfig[]) => void,
+  onError?: (err: Error) => void
+) {
+  const path = `users/${userId}/notification_configs`;
+  const configsRef = collection(db, 'users', userId, 'notification_configs');
+  const q = query(configsRef, orderBy('createdAt', 'desc'));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: NotificationConfig[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as NotificationConfig);
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.error('[Firestore Notification Configs Snapshot Error]:', error);
+      if (onError) onError(error);
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e) {
+        // Handled
+      }
+    }
+  );
+}
+
+export async function saveNotificationConfig(
+  userId: string,
+  config: NotificationConfig
+): Promise<void> {
+  if (!userId || !config.id) {
+    throw new Error('Missing userId or config.id for notification config.');
+  }
+  const path = `users/${userId}/notification_configs/${config.id}`;
+  const docRef = doc(db, 'users', userId, 'notification_configs', config.id);
+  try {
+    await setDoc(docRef, sanitizeForFirestore(config), { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteNotificationConfig(
+  userId: string,
+  configId: string
+): Promise<void> {
+  const path = `users/${userId}/notification_configs/${configId}`;
+  const docRef = doc(db, 'users', userId, 'notification_configs', configId);
+  try {
+    await deleteDoc(docRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+// ==========================================
+// 5. Audit Logging & Admin RBAC Services
+// ==========================================
+
+export async function logAuditEvent(
+  actor: { uid: string; email?: string | null },
+  action: string,
+  details: string,
+  severity: 'info' | 'warning' | 'security' = 'info',
+  target?: string
+): Promise<void> {
+  const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+  const path = `audit_logs/${logId}`;
+  const logRef = doc(db, 'audit_logs', logId);
+
+  const logPayload = {
+    id: logId,
+    timestamp: new Date().toISOString(),
+    actorUid: actor.uid,
+    actorEmail: actor.email || 'anonymous@auth',
+    action,
+    details,
+    severity,
+    target: target || 'system',
+  };
+
+  try {
+    await setDoc(logRef, sanitizeForFirestore(logPayload));
+  } catch (error) {
+    console.warn('[Audit Log Write Warning]:', error);
+  }
+}
+
+export function subscribeToAuditLogs(
+  onUpdate: (logs: AuditLogEntry[]) => void,
+  onError?: (err: Error) => void
+) {
+  const path = 'audit_logs';
+  const logsRef = collection(db, 'audit_logs');
+  const q = query(logsRef, orderBy('timestamp', 'desc'), limit(50));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const list: AuditLogEntry[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as AuditLogEntry);
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.error('[Firestore Audit Logs Snapshot Error]:', error);
+      if (onError) onError(error);
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e) {
+        // Handled
+      }
+    }
+  );
+}
+
+export function subscribeToAllUsers(
+  onUpdate: (users: SystemUserRecord[]) => void,
+  onError?: (err: Error) => void
+) {
+  const path = 'users';
+  const usersRef = collection(db, 'users');
+
+  return onSnapshot(
+    usersRef,
+    (snapshot) => {
+      const list: SystemUserRecord[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          uid: docSnap.id,
+          email: data.email || 'No email registered',
+          displayName: data.displayName || 'Unnamed User',
+          photoURL: data.photoURL,
+          role: data.role || (data.email === 'udaykanodia635@gmail.com' ? 'admin' : 'member'),
+          createdAt: data.createdAt || data.lastLoginAt || new Date().toISOString(),
+          lastLoginAt: data.lastLoginAt || new Date().toISOString(),
+          isBanned: Boolean(data.isBanned),
+        });
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.error('[Firestore All Users Snapshot Error]:', error);
+      if (onError) onError(error);
+      try {
+        handleFirestoreError(error, OperationType.LIST, path);
+      } catch (e) {
+        // Handled
+      }
+    }
+  );
+}
+
+export async function updateUserRole(
+  targetUserId: string,
+  newRole: SystemRole,
+  actor: { uid: string; email?: string | null }
+): Promise<void> {
+  const path = `users/${targetUserId}`;
+  const userRef = doc(db, 'users', targetUserId);
+  try {
+    await setDoc(userRef, { role: newRole, updatedAt: new Date().toISOString() }, { merge: true });
+    await logAuditEvent(
+      actor,
+      'UPDATE_USER_ROLE',
+      `Updated role for user ${targetUserId} to ${newRole}`,
+      'security',
+      targetUserId
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+

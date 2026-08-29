@@ -11,6 +11,14 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        request.auth.token.email == 'udaykanodia635@gmail.com'
+      );
+    }
+
     function isVaultMember(vaultId) {
       let vault = get(/databases/$(database)/documents/vaults/$(vaultId)).data;
       return isSignedIn() && (
@@ -30,19 +38,32 @@ service cloud.firestore {
       );
     }
 
-    // 1. User profile document isolated to authenticated owner
+    // 1. User profile document isolated to authenticated owner (or admin)
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
       
       // Multi-turn interactions / journal entries isolated to the authenticated owner
       match /interactions/{interactionId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       // Weekly digests isolated to the authenticated owner
       match /weekly_digests/{digestId} {
-        allow read, write: if isOwner(userId);
+        allow read, write: if isOwner(userId) || isAdmin();
       }
+
+      // External Notification Configurations
+      match /notification_configs/{configId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // 2. Audit Logs (Admin & Security Monitoring)
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     // 2. Collaborative Reflection Vaults

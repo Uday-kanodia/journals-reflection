@@ -13,6 +13,9 @@ import {
   Users,
   Layers,
   Zap,
+  ShieldAlert,
+  Bell,
+  MapPin,
 } from 'lucide-react';
 import { JournalInteraction, CollaborativeVault } from '../types';
 
@@ -24,11 +27,14 @@ interface HistorySidebarProps {
   onDeleteInteraction: (id: string, e: React.MouseEvent) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  activeTab: 'journal' | 'analytics' | 'digests';
-  onChangeTab: (tab: 'journal' | 'analytics' | 'digests') => void;
+  activeTab: 'journal' | 'analytics' | 'digests' | 'admin';
+  onChangeTab: (tab: 'journal' | 'analytics' | 'digests' | 'admin') => void;
   activeVault: CollaborativeVault | null;
   onOpenVaultModal: () => void;
   onExitVault: () => void;
+  onOpenNotifications: () => void;
+  onOpenAdmin?: () => void;
+  isAdmin?: boolean;
 }
 
 export const HistorySidebar: React.FC<HistorySidebarProps> = ({
@@ -44,15 +50,18 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
   activeVault,
   onOpenVaultModal,
   onExitVault,
+  onOpenNotifications,
+  isAdmin = false,
 }) => {
   const filtered = interactions.filter((item) => {
     const q = searchQuery.toLowerCase();
     const titleMatch = item.title?.toLowerCase().includes(q);
     const summaryMatch = item.summary?.toLowerCase().includes(q);
+    const locationMatch = item.location?.placeName?.toLowerCase().includes(q);
     const messageMatch = item.messages?.some((m) =>
       m.content.toLowerCase().includes(q)
     );
-    return titleMatch || summaryMatch || messageMatch;
+    return titleMatch || summaryMatch || locationMatch || messageMatch;
   });
 
   return (
@@ -103,6 +112,35 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Digests</span>
+          </button>
+        </div>
+
+        {/* Quick Tools: Notifications & Admin Console */}
+        <div className="flex items-center gap-1.5 pt-0.5">
+          <button
+            id="open-notifications-btn"
+            type="button"
+            onClick={onOpenNotifications}
+            className="flex-1 py-1.5 px-2.5 rounded-xl bg-white border border-[#e0e0d8] hover:border-[#5A5A40] text-[11px] font-semibold text-[#5A5A40] flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+            title="Configure Slack, Discord, and Webhook Notifications"
+          >
+            <Bell className="w-3 h-3" />
+            <span>Webhooks</span>
+          </button>
+
+          <button
+            id="admin-console-tab-btn"
+            type="button"
+            onClick={() => onChangeTab('admin')}
+            className={`flex-1 py-1.5 px-2.5 rounded-xl border text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all shadow-xs ${
+              activeTab === 'admin'
+                ? 'bg-stone-900 text-amber-400 border-stone-800'
+                : 'bg-white border-[#e0e0d8] hover:border-amber-600 text-stone-700'
+            }`}
+            title="Open Admin RBAC & Security Console"
+          >
+            <ShieldAlert className="w-3 h-3 text-amber-600" />
+            <span>Admin</span>
           </button>
         </div>
 
@@ -175,7 +213,7 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
           <input
             id="history-search-input"
             type="text"
-            placeholder="Search reflections..."
+            placeholder="Search reflections or locations..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-xs bg-white/70 border border-[#d8d8ce] rounded-xl text-[#4a4a40] placeholder-[#8a8a7a] focus:outline-none focus:border-[#5A5A40] focus:bg-white transition-colors"
@@ -245,6 +283,17 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
                   </button>
                 </div>
 
+                {item.location && (
+                  <div
+                    className={`flex items-center gap-1 text-[10px] mt-1 font-medium ${
+                      isActive ? 'text-white/90' : 'text-olive-700'
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{item.location.placeName}</span>
+                  </div>
+                )}
+
                 {item.summary && (
                   <p
                     className={`text-[11px] line-clamp-2 mt-1 leading-relaxed ${
@@ -286,3 +335,4 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
     </aside>
   );
 };
+

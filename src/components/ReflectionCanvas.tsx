@@ -14,20 +14,24 @@ import {
   Zap,
   Tag,
   Users,
+  MapPin,
+  X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { JournalInteraction, JournalMessage, ReflectionMode } from '../types';
+import { JournalInteraction, JournalMessage, ReflectionMode, JournalLocation } from '../types';
 import { VoiceDictationButton } from './VoiceDictationButton';
+import { LocationPickerModal } from './LocationPickerModal';
 
 interface ReflectionCanvasProps {
   activeInteraction: JournalInteraction | null;
-  onSendMessage: (prompt: string, mode: ReflectionMode) => Promise<void>;
+  onSendMessage: (prompt: string, mode: ReflectionMode, location?: JournalLocation) => Promise<void>;
   isGenerating: boolean;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
   saveErrorMessage: string | null;
   onRetrySave?: () => void;
   isVaultContext?: boolean;
   vaultTitle?: string;
+  onUpdateLocation?: (location: JournalLocation | null) => void;
 }
 
 export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
@@ -39,13 +43,24 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
   onRetrySave,
   isVaultContext = false,
   vaultTitle,
+  onUpdateLocation,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [selectedMode, setSelectedMode] = useState<ReflectionMode>('reflect');
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
+  const [stagedLocation, setStagedLocation] = useState<JournalLocation | null>(
+    activeInteraction?.location || null
+  );
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const messages = activeInteraction?.messages || [];
+
+  // Synchronize staged location with active interaction
+  useEffect(() => {
+    setStagedLocation(activeInteraction?.location || null);
+  }, [activeInteraction?.id, activeInteraction?.location]);
 
   // Scroll to bottom when messages update
   useEffect(() => {
@@ -58,7 +73,21 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
 
     const currentText = prompt.trim();
     setPrompt('');
-    await onSendMessage(currentText, selectedMode);
+    await onSendMessage(currentText, selectedMode, stagedLocation || undefined);
+  };
+
+  const handleSelectLocation = (loc: JournalLocation) => {
+    setStagedLocation(loc);
+    if (onUpdateLocation) {
+      onUpdateLocation(loc);
+    }
+  };
+
+  const handleClearLocation = () => {
+    setStagedLocation(null);
+    if (onUpdateLocation) {
+      onUpdateLocation(null);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -146,59 +175,93 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                   </span>
                 </>
               )}
+
+              {stagedLocation && (
+                <>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLocationModalOpen(true)}
+                    className="text-olive-800 hover:text-olive-950 flex items-center gap-1 font-semibold hover:underline"
+                    title="View / change pinned location"
+                  >
+                    <MapPin className="w-2.5 h-2.5" />
+                    <span className="truncate max-w-[140px]">{stagedLocation.placeName}</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Reflection Mode Badges */}
-        <div className="hidden sm:flex items-center gap-1.5 p-1 rounded-2xl bg-white border border-[#e0e0d8] shadow-sm">
+        {/* Right header actions */}
+        <div className="flex items-center gap-2">
+          {/* Reflection Mode Badges */}
+          <div className="hidden sm:flex items-center gap-1.5 p-1 rounded-2xl bg-white border border-[#e0e0d8] shadow-xs">
+            <button
+              id="mode-reflect-btn"
+              type="button"
+              onClick={() => setSelectedMode('reflect')}
+              className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
+                selectedMode === 'reflect'
+                  ? 'bg-[#5A5A40] text-white shadow-xs'
+                  : 'text-[#727262] hover:text-[#4a4a40]'
+              }`}
+            >
+              Reflect
+            </button>
+            <button
+              id="mode-brainstorm-btn"
+              type="button"
+              onClick={() => setSelectedMode('brainstorm')}
+              className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
+                selectedMode === 'brainstorm'
+                  ? 'bg-[#5A5A40] text-white shadow-xs'
+                  : 'text-[#727262] hover:text-[#4a4a40]'
+              }`}
+            >
+              Brainstorm
+            </button>
+            <button
+              id="mode-summarize-btn"
+              type="button"
+              onClick={() => setSelectedMode('summarize')}
+              className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
+                selectedMode === 'summarize'
+                  ? 'bg-[#5A5A40] text-white shadow-xs'
+                  : 'text-[#727262] hover:text-[#4a4a40]'
+              }`}
+            >
+              Summarize
+            </button>
+            <button
+              id="mode-deepen-btn"
+              type="button"
+              onClick={() => setSelectedMode('deepen')}
+              className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
+                selectedMode === 'deepen'
+                  ? 'bg-[#5A5A40] text-white shadow-xs'
+                  : 'text-[#727262] hover:text-[#4a4a40]'
+              }`}
+            >
+              Socratic
+            </button>
+          </div>
+
           <button
-            id="mode-reflect-btn"
             type="button"
-            onClick={() => setSelectedMode('reflect')}
-            className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
-              selectedMode === 'reflect'
-                ? 'bg-[#5A5A40] text-white shadow-xs'
-                : 'text-[#727262] hover:text-[#4a4a40]'
+            onClick={() => setIsLocationModalOpen(true)}
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+              stagedLocation
+                ? 'bg-olive-800 text-white border-olive-900 shadow-xs'
+                : 'bg-white hover:bg-stone-100 text-stone-700 border-stone-200 shadow-xs'
             }`}
+            title="Pin location to this reflection"
           >
-            Reflect
-          </button>
-          <button
-            id="mode-brainstorm-btn"
-            type="button"
-            onClick={() => setSelectedMode('brainstorm')}
-            className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
-              selectedMode === 'brainstorm'
-                ? 'bg-[#5A5A40] text-white shadow-xs'
-                : 'text-[#727262] hover:text-[#4a4a40]'
-            }`}
-          >
-            Brainstorm
-          </button>
-          <button
-            id="mode-summarize-btn"
-            type="button"
-            onClick={() => setSelectedMode('summarize')}
-            className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
-              selectedMode === 'summarize'
-                ? 'bg-[#5A5A40] text-white shadow-xs'
-                : 'text-[#727262] hover:text-[#4a4a40]'
-            }`}
-          >
-            Summarize
-          </button>
-          <button
-            id="mode-deepen-btn"
-            type="button"
-            onClick={() => setSelectedMode('deepen')}
-            className={`px-3 py-1 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer ${
-              selectedMode === 'deepen'
-                ? 'bg-[#5A5A40] text-white shadow-xs'
-                : 'text-[#727262] hover:text-[#4a4a40]'
-            }`}
-          >
-            Socratic
+            <MapPin className={`w-3.5 h-3.5 ${stagedLocation ? 'text-amber-300' : 'text-olive-700'}`} />
+            <span className="hidden sm:inline">
+              {stagedLocation ? stagedLocation.placeName : 'Pin Location'}
+            </span>
           </button>
         </div>
       </div>
@@ -378,6 +441,28 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
           className="max-w-4xl mx-auto relative"
         >
           <div className="relative rounded-[28px] bg-white border border-[#d8d8ce] focus-within:border-[#5A5A40] focus-within:ring-2 focus-within:ring-[#5A5A40]/15 transition-all p-3 shadow-sm">
+            {stagedLocation && (
+              <div className="mb-2 px-2.5 py-1 bg-stone-100/90 border border-stone-200 rounded-xl flex items-center justify-between text-xs text-stone-800">
+                <div className="flex items-center gap-1.5 font-medium truncate">
+                  <MapPin className="w-3.5 h-3.5 text-olive-800 flex-shrink-0" />
+                  <span className="truncate">{stagedLocation.placeName}</span>
+                  {stagedLocation.formattedAddress && (
+                    <span className="text-[11px] text-stone-400 truncate hidden sm:inline">
+                      ({stagedLocation.formattedAddress})
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearLocation}
+                  className="p-0.5 text-stone-400 hover:text-rose-600 rounded-md hover:bg-stone-200 transition-colors"
+                  title="Remove pinned location"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             <textarea
               ref={textareaRef}
               id="reflection-text-input"
@@ -396,6 +481,24 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
                   onTranscript={handleVoiceTranscript}
                   disabled={isGenerating}
                 />
+
+                <button
+                  type="button"
+                  id="pin-location-toolbar-btn"
+                  onClick={() => setIsLocationModalOpen(true)}
+                  className={`p-2 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors ${
+                    stagedLocation
+                      ? 'bg-olive-800 text-white shadow-xs'
+                      : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                  }`}
+                  title="Pin Geographic Location with Google Maps"
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span className="hidden md:inline">
+                    {stagedLocation ? 'Location Set' : 'Location'}
+                  </span>
+                </button>
+
                 <div className="hidden sm:flex items-center gap-1.5 text-xs text-[#8a8a7a]">
                   <span className="text-[10px] uppercase tracking-widest font-bold">Mode:</span>
                   <span className="capitalize text-[#5A5A40] font-bold text-xs">
@@ -421,6 +524,14 @@ export const ReflectionCanvas: React.FC<ReflectionCanvasProps> = ({
           </div>
         </form>
       </div>
+
+      {/* Interactive Google Maps Location Picker Modal */}
+      <LocationPickerModal
+        isOpen={isLocationModalOpen}
+        onClose={() => setIsLocationModalOpen(false)}
+        onSelectLocation={handleSelectLocation}
+        currentLocation={stagedLocation || undefined}
+      />
     </main>
   );
 };

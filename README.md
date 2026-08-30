@@ -163,3 +163,23 @@ Every user-facing feature has a corresponding step-by-step test verification cas
   - Workspace switches context to the collaborative vault with shared retrospective timeline.
   - Co-authors can submit retrospectives with author attribution badges.
   - Only invited members can read or write to `/vaults/{vaultId}`.
+
+### Test Case 8: Google Maps Location-Aware Pinning & Geo-Filtering
+- **Action**: In the reflection composer, click "Pin Location" (or select a preset like San Francisco/Kyoto, or use GPS Geolocation), save, and submit a reflection.
+- **Expected Outcome**:
+  - Pinned place name and coordinates are bound to the interaction document in Firestore.
+  - Interactive location badge renders on the reflection header.
+  - Pinned city/place appears in the sidebar history filter and allows instantaneous location-based filtering.
+
+### Test Case 9: External Notification Webhook Dispatch (Slack / Discord / Webhook)
+- **Action**: Click the Bell icon in the sidebar footer, add a Slack/Discord webhook URL, select triggers ("All Reflections", "High Clarity", "High Energy"), and click "Test Ping".
+- **Expected Outcome**:
+  - Server proxies the outbound notification through `/api/notifications/dispatch` with strict SSRF defense.
+  - Real-time Slack Block Kit or Discord rich embed message arrives with reflection summary, energy score, and pinned location.
+
+### Test Case 10: System Admin Console & Immutable Audit Trail
+- **Action**: Click "Admin" in the sidebar (for admin role or owner account).
+- **Expected Outcome**:
+  - Displays real-time aggregate telemetry (total reflections, collaborative vaults, system users, weekly digests).
+  - Allows managing user roles (`admin`, `member`) with dynamic Firestore security rule checks.
+  - Provides a live, chronological Security Audit Trail (`/audit_logs`) tracking administrative actions, role updates, and authentication events.

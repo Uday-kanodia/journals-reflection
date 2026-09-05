@@ -161,7 +161,7 @@ export const WeeklyDigestView: React.FC<WeeklyDigestViewProps> = ({
               <Calendar className="w-8 h-8 text-[#a0a090] mx-auto" />
               <p className="text-xs font-bold text-[#2e2e26]">No Weekly Digests Yet</p>
               <p className="text-[11px] text-[#8a8a7a]">
-                Click "Generate This Week's Synthesis" to analyze your recent reflections with Gemini 3.6 Flash.
+                Click "Generate This Week's Synthesis" to analyze your recent reflections with Gemini AI.
               </p>
             </div>
           ) : (

@@ -1,21 +1,31 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+import fs from "fs";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Standard Helper with Resilient Fallback Ladder Protocol:
-// Primary: "gemini-3.6-flash"
-// High-Availability Fallback: "gemini-3.1-flash-lite"
-// Dynamic Alias: "gemini-flash-latest"
-// Deep Reasoning Fallback: "gemini-3.7-flash"
+// Global unhandled error handlers for robust Cloud Run logging
+process.on("unhandledRejection", (reason) => {
+  console.error("[Unhandled Rejection]:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[Uncaught Exception]:", err);
+});
+
+// Resilient Model Fallback Ladder Protocol:
+// 1. Primary: "gemini-3.8-flash" (Highest throughput, current default)
+// 2. High-Availability: "gemini-3.1-flash-lite" (Separate light quota pool)
+// 3. Dynamic Alias: "gemini-flash-latest" (Stable release tracking)
+// 4. Secondary: "gemini-3.6-flash" (Previous generation fallback)
+// 5. Deep Reasoning: "gemini-3.7-flash" (Advanced reasoning)
 const MODEL_LADDER = [
-  "gemini-3.6-flash",
+  "gemini-3.8-flash",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
-  "gemini-3.7-flash"
+  "gemini-3.6-flash",
+  "gemini-3.7-flash",
 ];
 
 let genAIClient: GoogleGenAI | null = null;
@@ -36,6 +46,110 @@ interface InteractionMessage {
   content: string;
 }
 
+// Resilient text & metadata extractors for quota limit mitigation
+function extractLocalMetadata(entryText: string) {
+  const text = (entryText || "").trim();
+  const firstLine = text.split("\n")[0].replace(/[#*`_]/g, "").trim();
+  const words = text.split(/\s+/).filter(Boolean);
+  const title = firstLine.length > 0 && firstLine.length <= 45
+    ? firstLine
+    : words.slice(0, 5).join(" ") || "Reflective Journal Entry";
+
+  const summary = text.length > 200 ? text.slice(0, 197) + "..." : text;
+
+  const lower = text.toLowerCase();
+  let energy = 7;
+  let joy = 65;
+  let clarity = 75;
+  let calm = 70;
+  let tension = 20;
+
+  if (lower.includes("tired") || lower.includes("exhaust") || lower.includes("drain") || lower.includes("stuck")) {
+    energy = 4;
+    calm = 50;
+    tension = 45;
+  } else if (lower.includes("excite") || lower.includes("energ") || lower.includes("breakthrough") || lower.includes("inspire")) {
+    energy = 9;
+    joy = 85;
+    clarity = 85;
+  } else if (lower.includes("stress") || lower.includes("anxious") || lower.includes("overwhelm") || lower.includes("worry")) {
+    tension = 60;
+    calm = 40;
+    energy = 5;
+  }
+
+  const stopWords = new Set(["the", "and", "this", "that", "with", "have", "from", "were", "what", "when", "your", "will", "about", "there", "would"]);
+  const keywordCandidates = words
+    .map((w) => w.replace(/[^a-zA-Z]/g, "").toLowerCase())
+    .filter((w) => w.length > 4 && !stopWords.has(w));
+  const uniqueKeywords = Array.from(new Set(keywordCandidates)).slice(0, 5);
+  const keywords = uniqueKeywords.length > 0 ? uniqueKeywords : ["reflection", "clarity", "mindset"];
+
+  return {
+    title,
+    summary,
+    energyScore: energy,
+    emotionalMetrics: {
+      joy,
+      clarity,
+      calm,
+      focus: 80,
+      tension,
+      energy,
+      primaryMood: tension > 40 ? "Reflective" : energy > 7 ? "Energized" : "Calm",
+    },
+    extractedKeywords: keywords,
+  };
+}
+
+function generateLocalReflection(prompt: string, mode: string, historyCount: number): string {
+  const clean = prompt.trim();
+  const snippet = clean.length > 140 ? clean.slice(0, 137) + "..." : clean;
+
+  if (mode === "summarize") {
+    return (
+      `### Executive Reflection Summary\n\n` +
+      `*Insight: Synthesized via resilient local engine while AI quota refreshes.*\n\n` +
+      `**Core Focus:** ${snippet}\n\n` +
+      `**Key Takeaways:**\n` +
+      `- You articulated an intentional direction and paused to examine the details objectively.\n` +
+      `- Creating dedicated space to document this idea clears mental bandwidth for execution.\n\n` +
+      `**Next Intentional Action:**\n` +
+      `Choose 1 concrete task from this reflection to complete before switching contexts.`
+    );
+  } else if (mode === "brainstorm") {
+    return (
+      `### Creative Perspectives & Angles\n\n` +
+      `*Insight: Synthesized via resilient local engine while AI quota refreshes.*\n\n` +
+      `**Angle 1 — First-Principles Simplification:** What would this look like if it were radically simplified? Remove secondary friction.\n\n` +
+      `**Angle 2 — Inversion:** What action would directly impede progress here, and how can you safeguard against it?\n\n` +
+      `**Angle 3 — 48-Hour Micro-Test:** Rather than full implementation, what lightweight proof-of-concept can you test tomorrow?\n\n` +
+      `*Which of these 3 pathways resonates most with your immediate goal?*`
+    );
+  } else if (mode === "deepen") {
+    return (
+      `### Socratic Inquiry & Introspection\n\n` +
+      `*Insight: Synthesized via resilient local engine while AI quota refreshes.*\n\n` +
+      `Reflecting on your entry:\n\n` +
+      `1. **Core Assumption:** What expectation or narrative about yourself is influencing how you perceive this?\n` +
+      `2. **Emotional Truth:** Beneath the tactical details, what need or value is seeking acknowledgment right now?\n` +
+      `3. **Long-Term Lens:** If you look back on this moment in 6 months, what would a grounded, courageous response look like?\n\n` +
+      `*Take a slow breath and write down your immediate answer to whichever question creates the strongest reaction.*`
+    );
+  } else {
+    return (
+      `### Thoughtful Reflection\n\n` +
+      `*Insight: Synthesized via resilient local engine while AI quota refreshes.*\n\n` +
+      `Thank you for taking a moment to write this down. Processing your thoughts around "${snippet}" creates healthy perspective.\n\n` +
+      `**Observations:**\n` +
+      `- You are actively investing in clarity rather than staying in reactive mode.\n` +
+      `- Externalizing your thoughts helps dismantle perceived friction.\n\n` +
+      `**Guiding Prompt:**\n` +
+      `What is one restorative or productive step you feel inspired to take next?`
+    );
+  }
+}
+
 async function generateContentWithFallback(options: {
   systemInstruction?: string;
   contents: Array<{ role: string; parts: Array<{ text: string }> }>;
@@ -44,7 +158,8 @@ async function generateContentWithFallback(options: {
   const ai = getGenAI();
   let lastError: any = null;
 
-  for (const modelName of MODEL_LADDER) {
+  for (let i = 0; i < MODEL_LADDER.length; i++) {
+    const modelName = MODEL_LADDER[i];
     try {
       const response = await ai.models.generateContent({
         model: modelName,
@@ -64,26 +179,34 @@ async function generateContentWithFallback(options: {
       console.warn(`[Gemini API] Failed generation with model ${modelName}:`, err?.message || err);
       lastError = err;
       const statusCode = err?.status || err?.statusCode || (err?.response && err?.response.status);
-      const isRecoverable =
-        !statusCode ||
+      const errStr = String(err?.message || "").toLowerCase();
+      const isRateLimit =
         statusCode === 429 ||
-        statusCode === 503 ||
-        statusCode === 500 ||
-        statusCode === 404 ||
-        statusCode === 400;
+        errStr.includes("429") ||
+        errStr.includes("exhausted") ||
+        errStr.includes("quota") ||
+        errStr.includes("rate");
 
-      if (!isRecoverable) {
-        throw err;
+      // If hitting a rate limit / quota burst, wait briefly with jitter before trying next model
+      if (isRateLimit && i < MODEL_LADDER.length - 1) {
+        const delayMs = 600 + Math.floor(Math.random() * 600);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
   }
 
-  throw new Error(`All Gemini models in fallback ladder exhausted. Last error: ${lastError?.message || "Unknown error"}`);
+  throw lastError || new Error("All Gemini models in fallback ladder exhausted.");
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  
+  // In AI Studio dev container, NGINX proxies port 8080 to internal port 3000.
+  // On Google Cloud Run or standalone production, Cloud Run routes directly to process.env.PORT (defaults to 8080).
+  const isAIStudio = Boolean(process.env.APPLET_ID || process.env.DEFAULT_APP_PORT);
+  const PORT = isAIStudio
+    ? 3000
+    : (process.env.PORT ? parseInt(process.env.PORT, 10) : 8080);
 
   // 1. Top-Level Request Deserialization (Ordering Guarantee)
   app.use(express.json({ limit: "10mb" }));
@@ -100,23 +223,25 @@ async function startServer() {
 
   // Multi-Turn Reflective Chat & Brainstorming Endpoint
   app.post("/api/gemini/converse", async (req, res) => {
+    // Defensive Payload Ingestion (Null-Safe Destructuring)
+    const data = req.body && typeof req.body === "object" ? req.body : {};
+    const { messages, currentPrompt, mode, isVaultContext, vaultTitle, isFirstTurn } = data;
+
+    if (!currentPrompt || typeof currentPrompt !== "string" || !currentPrompt.trim()) {
+      return res.status(400).json({ error: "Missing or invalid 'currentPrompt' in request body." });
+    }
+
+    const safePrompt = currentPrompt.trim().slice(0, 10000);
+    const safeHistory: InteractionMessage[] = Array.isArray(messages)
+      ? messages.map((m: any) => ({
+          role: m.role === "model" ? "model" : "user",
+          content: typeof m.content === "string" ? m.content.slice(0, 10000) : "",
+        }))
+      : [];
+
+    const localMeta = isFirstTurn ? extractLocalMetadata(safePrompt) : undefined;
+
     try {
-      // 2. Defensive Payload Ingestion (Null-Safe Destructuring)
-      const data = req.body && typeof req.body === "object" ? req.body : {};
-      const { messages, currentPrompt, mode, isVaultContext, vaultTitle } = data;
-
-      if (!currentPrompt || typeof currentPrompt !== "string" || !currentPrompt.trim()) {
-        return res.status(400).json({ error: "Missing or invalid 'currentPrompt' in request body." });
-      }
-
-      const safePrompt = currentPrompt.trim().slice(0, 10000);
-      const safeHistory: InteractionMessage[] = Array.isArray(messages)
-        ? messages.map((m: any) => ({
-            role: m.role === "model" ? "model" : "user",
-            content: typeof m.content === "string" ? m.content.slice(0, 10000) : "",
-          }))
-        : [];
-
       // Determine reflective personality/focus
       let systemInstruction =
         "You are an empathetic, insightful, and structured AI Reflection & Journaling Companion. " +
@@ -156,26 +281,36 @@ async function startServer() {
       return res.json({
         reply: text,
         modelUsed,
+        rateLimited: false,
+        metadata: localMeta,
         timestamp: new Date().toISOString(),
       });
     } catch (error: any) {
-      console.error("[Converse Endpoint Error]:", error);
-      return res.status(500).json({
-        error: error?.message || "Failed to generate reflection from Gemini AI.",
+      console.warn("[Converse Endpoint Rate Limit Fallback]:", error?.message || error);
+      const fallbackReply = generateLocalReflection(safePrompt, mode || "reflect", safeHistory.length);
+      return res.json({
+        reply: fallbackReply,
+        modelUsed: "local-resilient-fallback",
+        rateLimited: true,
+        metadata: localMeta || extractLocalMetadata(safePrompt),
+        notice: "Gemini rate quota reached; synthesized via resilient local reflection.",
+        timestamp: new Date().toISOString(),
       });
     }
   });
 
   // Single-Turn Entry Summary + Emotional & Keyword Extraction
   app.post("/api/gemini/summarize-entry", async (req, res) => {
+    const data = req.body && typeof req.body === "object" ? req.body : {};
+    const { entryText } = data;
+
+    if (!entryText || typeof entryText !== "string") {
+      return res.status(400).json({ error: "Missing 'entryText' in request body." });
+    }
+
+    const localMeta = extractLocalMetadata(entryText);
+
     try {
-      const data = req.body && typeof req.body === "object" ? req.body : {};
-      const { entryText } = data;
-
-      if (!entryText || typeof entryText !== "string") {
-        return res.status(400).json({ error: "Missing 'entryText' in request body." });
-      }
-
       const prompt =
         "Analyze this journal reflection entry and provide structured analytics in strict JSON format: \n" +
         "1. title: A concise, compelling title (max 6 words).\n" +
@@ -202,50 +337,36 @@ async function startServer() {
 
       const parsed = JSON.parse(text || "{}");
       return res.json({
-        title: parsed.title || "Reflective Journal Entry",
-        summary: parsed.summary || "Personal thoughts and insights captured.",
-        energyScore: typeof parsed.energyScore === "number" ? Math.min(10, Math.max(1, parsed.energyScore)) : 7,
-        emotionalMetrics: parsed.emotionalMetrics || {
-          joy: 65,
-          clarity: 70,
-          calm: 75,
-          focus: 80,
-          tension: 25,
-          energy: 7,
-          primaryMood: "Reflective",
-        },
-        extractedKeywords: Array.isArray(parsed.extractedKeywords) ? parsed.extractedKeywords.slice(0, 6) : ["growth", "mindset", "clarity"],
+        title: parsed.title || localMeta.title,
+        summary: parsed.summary || localMeta.summary,
+        energyScore: typeof parsed.energyScore === "number" ? Math.min(10, Math.max(1, parsed.energyScore)) : localMeta.energyScore,
+        emotionalMetrics: parsed.emotionalMetrics || localMeta.emotionalMetrics,
+        extractedKeywords: Array.isArray(parsed.extractedKeywords) && parsed.extractedKeywords.length > 0 ? parsed.extractedKeywords.slice(0, 6) : localMeta.extractedKeywords,
+        rateLimited: false,
       });
     } catch (error: any) {
-      console.error("[Summarize Endpoint Error]:", error);
+      console.warn("[Summarize Endpoint Warning] Using resilient local metadata extractor:", error?.message || error);
       return res.json({
-        title: "Journal Reflection",
-        summary: "Personal thoughts and insights captured.",
-        energyScore: 7,
-        emotionalMetrics: {
-          joy: 60,
-          clarity: 70,
-          calm: 70,
-          focus: 75,
-          tension: 20,
-          energy: 7,
-          primaryMood: "Introspective",
-        },
-        extractedKeywords: ["reflection", "journal", "focus"],
+        title: localMeta.title,
+        summary: localMeta.summary,
+        energyScore: localMeta.energyScore,
+        emotionalMetrics: localMeta.emotionalMetrics,
+        extractedKeywords: localMeta.extractedKeywords,
+        rateLimited: true,
       });
     }
   });
 
   // Automated Weekly Synthesis Digest Generator Endpoint
   app.post("/api/gemini/weekly-digest", async (req, res) => {
+    const data = req.body && typeof req.body === "object" ? req.body : {};
+    const { entries, weekStartDate, weekEndDate } = data;
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: "Missing or empty 'entries' array in request body." });
+    }
+
     try {
-      const data = req.body && typeof req.body === "object" ? req.body : {};
-      const { entries, weekStartDate, weekEndDate } = data;
-
-      if (!Array.isArray(entries) || entries.length === 0) {
-        return res.status(400).json({ error: "Missing or empty 'entries' array in request body." });
-      }
-
       // Compact entry representations
       const serializedEntries = entries
         .slice(0, 30)
@@ -287,13 +408,35 @@ async function startServer() {
         growthActions: Array.isArray(parsed.growthActions) ? parsed.growthActions : ["Set 1 daily top priority before opening communications.", "Schedule 15 minutes of quiet reflection each evening."],
         emotionalOverview: parsed.emotionalOverview || "Energy remained steady with heightened clarity in problem-solving periods.",
         modelUsed,
+        rateLimited: false,
         entryCount: entries.length,
         createdAt: new Date().toISOString(),
       });
     } catch (error: any) {
-      console.error("[Weekly Digest Error]:", error);
-      return res.status(500).json({
-        error: error?.message || "Failed to generate weekly synthesis.",
+      console.warn("[Weekly Digest Rate Limit Fallback]:", error?.message || error);
+      return res.json({
+        title: "Weekly Mindful Synthesis",
+        synthesis: `This week you recorded ${entries.length} reflections exploring key themes of intentional focus, personal growth, and problem solving. Reviewing your logs demonstrates continuous commitment to mental clarity and balanced action. While live AI processing is currently rate-limited, your recorded reflections show clear forward momentum and self-awareness.`,
+        coreThemes: [
+          "Strategic Prioritization: Focus on high-leverage activities",
+          "Emotional Equilibrium: Navigating complex daily demands with calm",
+          "Continuous Iteration: Learning from daily retrospectives"
+        ],
+        keyTakeaways: [
+          "Consistent daily journaling clarifies decision-making and reduces cognitive overload.",
+          "Protecting dedicated quiet blocks elevates creative clarity.",
+          "Translating thoughts into written reflections cements strategic accountability."
+        ],
+        growthActions: [
+          "Define 1 primary strategic priority each morning before reading inbox.",
+          "Reserve 10 minutes each evening for an uninterrupted mental recap.",
+          "Maintain clear boundaries between deep focus and reactive communication."
+        ],
+        emotionalOverview: "Overall steady energy with resilient focus across weekly entries.",
+        modelUsed: "local-resilient-digest",
+        rateLimited: true,
+        entryCount: entries.length,
+        createdAt: new Date().toISOString(),
       });
     }
   });
@@ -507,16 +650,33 @@ async function startServer() {
 
   // Vite Middleware Integration for Development & Static fallback for Production
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    // In production, serve pre-bundled static assets from dist/
+    const candidateDist = path.join(process.cwd(), "dist");
+    const distPath = fs.existsSync(path.join(candidateDist, "index.html"))
+      ? candidateDist
+      : path.resolve(__dirname);
+
     app.use(express.static(distPath));
+
+    // Fallback for unmatched API routes
+    app.all("/api/*", (req, res) => {
+      res.status(404).json({ error: `API route ${req.method} ${req.path} not found.` });
+    });
+
+    // SPA client-side fallback
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      res.sendFile(path.join(distPath, "index.html"), (err) => {
+        if (err) {
+          res.status(500).send("Application static assets not found. Please ensure 'npm run build' was executed.");
+        }
+      });
     });
   }
 

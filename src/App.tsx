@@ -333,6 +333,7 @@ export default function App() {
     setSaveErrorMessage(null);
 
     try {
+      const isFirst = currentSession.messages.length === 1;
       const response = await fetch('/api/gemini/converse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -344,6 +345,7 @@ export default function App() {
           })),
           mode,
           title: currentSession.title,
+          isFirstTurn: isFirst,
         }),
       });
 
@@ -354,7 +356,7 @@ export default function App() {
 
       const data = await response.json();
       const modelReply = data.reply || 'Reflection generated.';
-      const modelUsed = data.modelUsed || 'gemini-3.6-flash';
+      const modelUsed = data.modelUsed || 'gemini-3.8-flash';
 
       const aiMsg: JournalMessage = {
         id: `msg_${Date.now()}_ai`,
@@ -367,27 +369,24 @@ export default function App() {
       currentSession.messages = [...updatedMessages, aiMsg];
       currentSession.updatedAt = new Date().toISOString();
 
-      // If this is the first turn, automatically extract title, emotional and psycholinguistic metadata
-      if (currentSession.messages.length === 2) {
-        try {
-          const sumRes = await fetch('/api/gemini/summarize-entry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entryText: promptText }),
-          });
-          if (sumRes.ok) {
-            const sumData = await sumRes.json();
-            if (sumData.title) currentSession.title = sumData.title;
-            if (sumData.summary) currentSession.summary = sumData.summary;
-            if (sumData.sentiment) currentSession.sentiment = sumData.sentiment;
-            if (sumData.energyScore) currentSession.energyScore = sumData.energyScore;
-            if (sumData.keywords) currentSession.keywords = sumData.keywords;
-            if (sumData.emotionalDimensions) {
-              currentSession.emotionalDimensions = sumData.emotionalDimensions;
-            }
-          }
-        } catch (e) {
-          console.warn('Auto-summary failed gracefully', e);
+      // Consume unified session metadata directly from converse endpoint, eliminating duplicate LLM requests
+      if (data.metadata) {
+        const meta = data.metadata;
+        if (meta.title && (!currentSession.title || currentSession.title === 'Untitled Reflection')) {
+          currentSession.title = meta.title;
+        }
+        if (meta.summary) currentSession.summary = meta.summary;
+        if (meta.energyScore) currentSession.energyScore = meta.energyScore;
+        if (meta.extractedKeywords) currentSession.keywords = meta.extractedKeywords;
+        if (meta.emotionalMetrics) {
+          currentSession.emotionalDimensions = {
+            joy: meta.emotionalMetrics.joy || 65,
+            clarity: meta.emotionalMetrics.clarity || 75,
+            calm: meta.emotionalMetrics.calm || 70,
+            focus: meta.emotionalMetrics.focus || 80,
+            tension: meta.emotionalMetrics.tension || 20,
+          };
+          currentSession.sentiment = meta.emotionalMetrics.tension > 40 ? 'needs_focus' : 'balanced';
         }
       }
 

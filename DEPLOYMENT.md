@@ -142,18 +142,19 @@ gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
 
 ## 5. Build & Deploy to Google Cloud Run
 
-Deploy directly from source to Cloud Run, automatically binding the Secret Manager secret:
+Deploy directly from source to Cloud Run. The server automatically detects the Cloud Run environment and binds to the injected `$PORT` (default `8080`), while gracefully supporting custom port flags or standard container builds:
 
 ```bash
-# Build and deploy container to Cloud Run
+# Build and deploy container to Cloud Run from source
 gcloud run deploy $SERVICE_NAME \
   --source . \
   --platform managed \
   --region $REGION \
   --allow-unauthenticated \
-  --port 3000 \
   --set-secrets GEMINI_API_KEY=GEMINI_API_KEY:latest
 ```
+
+*(Note: The server automatically listens on Cloud Run's `$PORT` environment variable (default 8080) and uses 3000 in AI Studio sandbox environments).*
 
 ---
 
